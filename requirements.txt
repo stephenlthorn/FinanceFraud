@@ -1,0 +1,7 @@
+pytidb==0.0.14
+streamlit>=1.57.0
+starlette>=1.0.0
+plotly>=5.18.0
+pymysql>=1.1.0
+python-dotenv>=1.0.0
+pandas>=2.0.0

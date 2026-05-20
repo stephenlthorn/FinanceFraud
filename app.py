@@ -234,58 +234,102 @@ def _get_indexes(): return get_index_info()
 
 @st.cache_data(ttl=300)
 def _network_graph() -> go.Figure:
-    nodes = {
+    # Fraud chain nodes (highlighted)
+    chain = {
         "MBR-BOB-001": (0.0,  0.0, "Bob Johnson", "#00C49A", 22),
-        "MBR-SAR-002": (-0.8, 0.9, "Sarah Chen",  "#00C49A", 18),
-        "MBR-MIK-003": (1.0,  0.0, "Mike Torres", "#F59E0B", 18),
-        "MBR-ALE-004": (2.0,  0.0, "Alex Rivera", "#EF4444", 18),
-        "MBR-JOR-005": (3.0,  0.0, "Jordan Kim",  "#DC2626", 18),
+        "MBR-MIK-003": (2.2,  0.0, "Mike Torres", "#F59E0B", 18),
+        "MBR-ALE-004": (3.8,  0.0, "Alex Rivera", "#EF4444", 18),
+        "MBR-JOR-005": (5.2,  0.0, "Jordan Kim",  "#DC2626", 18),
     }
-    edges = [
-        ("MBR-BOB-001","MBR-SAR-002","$35",        "#94A3B8","normal"),
-        ("MBR-BOB-001","MBR-MIK-003","$200",        "#3B82F6","trigger"),
-        ("MBR-MIK-003","MBR-ALE-004","$180 +28min","#F59E0B","flagged"),
-        ("MBR-ALE-004","MBR-JOR-005","$170 +15min","#EF4444","flagged"),
-    ]
+    # Normal transfers — the "noise"
+    noise = {
+        "n1":  (-1.4,  0.9, "Sarah Chen",    "#CBD5E1", 13),
+        "n2":  (-1.6, -0.3, "Emma Wilson",   "#CBD5E1", 12),
+        "n3":  (-0.9, -1.3, "Carlos R.",     "#CBD5E1", 12),
+        "n4":  ( 0.6,  1.5, "Lisa Park",     "#CBD5E1", 12),
+        "n5":  ( 0.5, -1.4, "David Kim",     "#CBD5E1", 12),
+        "n6":  ( 1.5,  1.3, "Priya S.",      "#CBD5E1", 11),
+        "n7":  (-0.2, -1.8, "Tom Nguyen",    "#CBD5E1", 11),
+        "n8":  ( 1.8, -1.1, "Rachel W.",     "#CBD5E1", 11),
+        "n9":  (-1.8,  0.2, "James Liu",     "#CBD5E1", 11),
+        "n10": ( 2.8,  1.1, "Ana Costa",     "#CBD5E1", 10),
+    }
+    # Normal amounts for noise edges
+    noise_amounts = ["$25","$80","$120","$45","$200","$15","$60","$90","$35","$50"]
+
     fig = go.Figure()
-    for src, dst, lbl, color, etype in edges:
-        x0,y0 = nodes[src][0],nodes[src][1]
-        x1,y1 = nodes[dst][0],nodes[dst][1]
+
+    # Draw noise edges first (behind everything)
+    bob_x, bob_y = chain["MBR-BOB-001"][0], chain["MBR-BOB-001"][1]
+    for (nid, (nx, ny, _, _, _)), amt in zip(noise.items(), noise_amounts):
+        fig.add_trace(go.Scatter(
+            x=[bob_x, nx, None], y=[bob_y, ny, None], mode="lines",
+            line=dict(color="#E2E8F0", width=1.5, dash="dot"),
+            hoverinfo="skip", showlegend=False))
+
+    # Draw fraud chain edges (on top, bold)
+    chain_edges = [
+        ("MBR-BOB-001","MBR-MIK-003","$200",     "#3B82F6", 3.5),
+        ("MBR-MIK-003","MBR-ALE-004","$180 +28m","#F59E0B", 3),
+        ("MBR-ALE-004","MBR-JOR-005","$170 +15m","#EF4444", 3),
+    ]
+    for src, dst, lbl, color, width in chain_edges:
+        x0,y0 = chain[src][0], chain[src][1]
+        x1,y1 = chain[dst][0], chain[dst][1]
         fig.add_trace(go.Scatter(
             x=[x0,x1,None], y=[y0,y1,None], mode="lines",
-            line=dict(color=color, width=2 if etype=="normal" else 3,
-                      dash="dot" if etype=="normal" else "solid"),
+            line=dict(color=color, width=width),
             hoverinfo="skip", showlegend=False))
-        mx,my = (x0+x1)/2,(y0+y1)/2+0.1
+        mx,my = (x0+x1)/2, (y0+y1)/2+0.14
         fig.add_annotation(x=mx,y=my,text=f"<b>{lbl}</b>",showarrow=False,
                            font=dict(size=11,color=color),
-                           bgcolor="rgba(255,255,255,0.85)",borderpad=3)
-    status = {"MBR-BOB-001":"active","MBR-SAR-002":"active",
-              "MBR-MIK-003":"active","MBR-ALE-004":"FLAGGED","MBR-JOR-005":"FROZEN"}
-    for mid,(x,y,name,color,sz) in nodes.items():
+                           bgcolor="rgba(255,255,255,0.9)",borderpad=3)
+
+    # Draw noise nodes (greyed out)
+    for nid, (nx, ny, name, color, sz) in noise.items():
         fig.add_trace(go.Scatter(
-            x=[x],y=[y],mode="markers+text",
-            marker=dict(size=sz,color=color,line=dict(color="white",width=2)),
-            text=[name],textposition="top center",
-            textfont=dict(size=11,color="#0F172A"),
-            hovertext=[f"<b>{name}</b><br>{mid}<br>Status: {status[mid]}"],
-            hoverinfo="text",showlegend=False))
+            x=[nx], y=[ny], mode="markers+text",
+            marker=dict(size=sz, color=color, line=dict(color="#94A3B8", width=1)),
+            text=[name], textposition="top center",
+            textfont=dict(size=9, color="#94A3B8"),
+            hoverinfo="skip", showlegend=False))
+
+    # Draw fraud chain nodes (highlighted, on top)
+    status = {"MBR-BOB-001":"active","MBR-MIK-003":"active",
+              "MBR-ALE-004":"FLAGGED","MBR-JOR-005":"FROZEN"}
+    text_pos = {"MBR-BOB-001":"bottom center","MBR-MIK-003":"top center",
+                "MBR-ALE-004":"top center","MBR-JOR-005":"bottom center"}
+    for mid,(x,y,name,color,sz) in chain.items():
+        fig.add_trace(go.Scatter(
+            x=[x], y=[y], mode="markers+text",
+            marker=dict(size=sz, color=color,
+                        line=dict(color="white", width=2.5)),
+            text=[name], textposition=text_pos[mid],
+            textfont=dict(size=11, color="#0F172A", family="Arial Black"),
+            hovertext=[f"<b>{name}</b><br>Status: {status[mid]}"],
+            hoverinfo="text", showlegend=False))
+
     fig.update_layout(
-        title=dict(text="Pay Friends Network - Fraud Chain",
-                   font=dict(size=13,color="#0F172A"),x=0.5),
-        xaxis=dict(visible=False,range=[-1.3,3.6]),
-        yaxis=dict(visible=False,range=[-0.6,1.4]),
-        plot_bgcolor="#F8FAFC",paper_bgcolor="#F8FAFC",
-        margin=dict(l=20,r=20,t=40,b=10),height=260,
+        title=dict(
+            text="<b>Pay Friends Network</b>  —  CTE traces fraud chain through 847 transfers",
+            font=dict(size=12, color="#0F172A"), x=0.5),
+        xaxis=dict(visible=False, range=[-2.4, 6.2]),
+        yaxis=dict(visible=False, range=[-2.4, 2.0]),
+        plot_bgcolor="#F8FAFC", paper_bgcolor="#F8FAFC",
+        margin=dict(l=10, r=10, t=44, b=10), height=320,
         annotations=[
-            dict(x=3.0,y=-0.4,text="&#128274; Frozen<br>Zero history",
-                 showarrow=True,arrowhead=2,ax=0,ay=-28,
-                 font=dict(size=10,color="#DC2626"),
-                 bgcolor="rgba(254,226,226,0.9)",borderpad=4,bordercolor="#EF4444"),
-            dict(x=2.1,y=-0.35,text="&#128680; 97% fraud",
-                 showarrow=True,arrowhead=2,ax=10,ay=-22,
-                 font=dict(size=10,color="#EF4444"),
-                 bgcolor="rgba(254,226,226,0.9)",borderpad=4,bordercolor="#F59E0B"),
+            dict(x=5.2, y=-0.55,
+                 text="&#128274; Frozen / Zero history",
+                 showarrow=True, arrowhead=2, ax=0, ay=-30,
+                 font=dict(size=10, color="#DC2626"),
+                 bgcolor="rgba(254,226,226,0.92)", borderpad=4,
+                 bordercolor="#EF4444"),
+            dict(x=3.9, y=-0.45,
+                 text="&#128680; 97% fraud",
+                 showarrow=True, arrowhead=2, ax=15, ay=-24,
+                 font=dict(size=10, color="#EF4444"),
+                 bgcolor="rgba(254,226,226,0.92)", borderpad=4,
+                 bordercolor="#F59E0B"),
         ])
     return fig
 

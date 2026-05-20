@@ -1,4 +1,4 @@
-"""FinanceCo AI Demo - TiDB Cloud memory + fraud graph showcase."""
+"""FinanceCo AI Demo — TiDB Cloud: hybrid search + graph fraud detection."""
 import re
 import os
 from dotenv import load_dotenv
@@ -14,7 +14,6 @@ from backend import (
     get_all_pay_friends, get_all_tickets, get_all_fraud_flags,
 )
 
-# ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="FinanceCo AI Demo",
     page_icon="💚",
@@ -22,7 +21,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Backend shim (direct imports, no lazy loading needed) ────────────────────
 def _load_backends():
     return {
         "recall_support": recall_support,
@@ -38,33 +36,14 @@ def _load_backends():
         "get_all_fraud_flags": get_all_fraud_flags,
     }
 
-
 be = _load_backends()
 
-# ── Session state ──────────────────────────────────────────────────────────────
-if "active_q" not in st.session_state:
-    st.session_state.active_q = None
-if "q_results" not in st.session_state:
-    st.session_state.q_results = {}
-
-# ── Global CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 html,body,[class*="css"]{font-family:-apple-system,system-ui,BlinkMacSystemFont,sans-serif}
 .block-container{padding:1.25rem 1.75rem 1rem;max-width:100%}
 div[data-testid="stTabs"] button[data-baseweb="tab"]{
-  font-size:14px;font-weight:600;padding:.45rem 1.25rem}
-
-/* stat cards */
-.stat-card{border-radius:10px;padding:1rem 1.25rem;text-align:center;border:1px solid}
-.stat-num{font-size:2rem;font-weight:800;line-height:1.1}
-.stat-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-top:.25rem}
-
-/* phone frame chat */
-.chat-msg-user{text-align:right;margin-bottom:10px}
-.chat-msg-ai{text-align:left;margin-top:6px}
-
-/* SQL panel */
+  font-size:14px;font-weight:600;padding:.45rem 1.5rem}
 .sql-panel{background:#0F172A;border-radius:10px;padding:1.25rem 1.5rem;
            color:#E2E8F0;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.7}
 .sql-section-label{font-family:-apple-system,system-ui,sans-serif;font-size:11px;
@@ -89,7 +68,7 @@ div[data-testid="stTabs"] button[data-baseweb="tab"]{
 </style>
 """, unsafe_allow_html=True)
 
-# ── Pre-written demo responses ─────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 QUESTIONS = {
     1: "Why was my gas pump declined?",
     2: "Did my Pay Friends transfer go through? It looks suspicious.",
@@ -161,12 +140,11 @@ MEM_SNIPPETS = {
         "TKT-BOB-001 - Out-of-state card decline (score 0.72)"],
 }
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 STOP_WORDS = {
     "a","an","the","is","it","in","on","at","to","for","of","and","or","but",
     "why","how","what","when","where","who","my","your","i","did","was","were",
-    "got","looks","looks","through","go","get","this","that","have",
+    "got","looks","through","go","get","this","that","have",
 }
 
 def _tokenize(query: str) -> str:
@@ -175,7 +153,7 @@ def _tokenize(query: str) -> str:
     for w in words:
         if w.lower() in STOP_WORDS:
             parts.append(f'<span style="color:#475569;text-decoration:line-through;'
-                         f'font-size:13px" title="Low IDF - near-zero BM25 weight">{w}</span>')
+                         f'font-size:13px">{w}</span>')
         else:
             parts.append(f'<span style="background:#7C3AED;color:#fff;padding:1px 6px;'
                          f'border-radius:4px;font-size:13px;font-weight:600;margin:0 2px">{w}</span>')
@@ -221,7 +199,7 @@ def _phone_frame(label: str, q_text: str, response_html: str,
         )
     return f"""
 <div style="border:6px solid #1B2B4A;border-radius:36px;background:#0A0E1A;
-            padding:16px 14px 20px;max-width:310px;margin:0 auto;min-height:590px">
+            padding:16px 14px 20px;max-width:310px;margin:0 auto;min-height:540px">
   <div style="text-align:center;margin-bottom:10px">
     <div style="background:#2D3D5A;width:70px;height:16px;border-radius:8px;
                 display:inline-block"></div>
@@ -231,7 +209,7 @@ def _phone_frame(label: str, q_text: str, response_html: str,
     <span style="color:white;font-weight:700;font-size:15px">&#128154; FinanceCo</span>
     <div style="color:rgba(255,255,255,.8);font-size:10px;margin-top:1px">{label}</div>
   </div>
-  <div style="background:#F5F7FA;padding:14px 12px;border-radius:0 0 14px 14px;min-height:500px">
+  <div style="background:#F5F7FA;padding:14px 12px;border-radius:0 0 14px 14px;min-height:450px">
     <div style="text-align:right;margin-bottom:10px">
       <div style="display:inline-block;background:#00C49A;color:white;
                   padding:8px 12px;border-radius:16px 16px 4px 16px;
@@ -253,94 +231,168 @@ def _phone_frame(label: str, q_text: str, response_html: str,
 """
 
 
-@st.cache_data(ttl=300)
-def _build_network_graph() -> go.Figure:
-    """Plotly network graph of the Pay Friends transfer chain."""
-    # Node positions
-    nodes = {
-        "MBR-BOB-001": (0.0, 0.0, "Bob Johnson", "#00C49A", 22),
-        "MBR-SAR-002": (-0.8, 0.9, "Sarah Chen", "#00C49A", 18),
-        "MBR-MIK-003": (1.0, 0.0, "Mike Torres", "#F59E0B", 18),
-        "MBR-ALE-004": (2.0, 0.0, "Alex Rivera", "#EF4444", 18),
-        "MBR-JOR-005": (3.0, 0.0, "Jordan Kim", "#DC2626", 18),
-    }
-    edges = [
-        ("MBR-BOB-001", "MBR-SAR-002", "$35", "#94A3B8", "normal"),
-        ("MBR-BOB-001", "MBR-MIK-003", "$200", "#3B82F6", "trigger"),
-        ("MBR-MIK-003", "MBR-ALE-004", "$180 +28min", "#F59E0B", "flagged"),
-        ("MBR-ALE-004", "MBR-JOR-005", "$170 +15min", "#EF4444", "flagged"),
-    ]
+# ── Flow diagrams ─────────────────────────────────────────────────────────────
+def _flow_q1() -> str:
+    return """
+<div style="background:#0F172A;border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:.75rem">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+              color:#60A5FA;margin-bottom:.85rem">How TiDB Finds the Answer</div>
 
-    fig = go.Figure()
+  <div style="text-align:center;margin-bottom:.6rem">
+    <div style="display:inline-block;background:#1E293B;border:1px solid #334155;
+                border-radius:6px;padding:.35rem .9rem;color:#E2E8F0;font-size:12px">
+      &#128221; <em>"Why was my gas pump declined?"</em>
+    </div>
+  </div>
+  <div style="text-align:center;color:#334155;font-size:13px;margin-bottom:.5rem">&#8595; runs two parallel searches</div>
 
-    # Edge traces
-    for src, dst, label, color, etype in edges:
-        x0, y0 = nodes[src][0], nodes[src][1]
-        x1, y1 = nodes[dst][0], nodes[dst][1]
-        dash = "dot" if etype == "normal" else "solid"
-        width = 2 if etype == "normal" else 3
-        fig.add_trace(go.Scatter(
-            x=[x0, x1, None], y=[y0, y1, None],
-            mode="lines",
-            line=dict(color=color, width=width, dash=dash),
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-        # Edge label at midpoint
-        mx, my = (x0 + x1) / 2, (y0 + y1) / 2 + 0.1
-        fig.add_annotation(
-            x=mx, y=my, text=f"<b>{label}</b>",
-            showarrow=False, font=dict(size=11, color=color),
-            bgcolor="rgba(255,255,255,0.85)", borderpad=3,
-        )
+  <div style="display:flex;gap:.75rem;margin-bottom:.55rem">
+    <div style="flex:1;background:#1E0D3F;border:1px solid #4C1D95;border-radius:8px;padding:.65rem .85rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#DDD6FE;letter-spacing:.1em;margin-bottom:.25rem">&#9312; BM25 Full-Text</div>
+      <div style="font-size:11px;color:#C4B5FD;font-family:monospace;margin-bottom:.2rem">FTS_MATCH_WORD()</div>
+      <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+        Scores <b style="color:#DDD6FE">gas</b>, <b style="color:#DDD6FE">pump</b>,
+        <b style="color:#DDD6FE">declined</b> by IDF rarity. Rare domain terms float to top.
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;color:#475569;font-size:18px;padding:0 .15rem">+</div>
+    <div style="flex:1;background:#0A1F33;border:1px solid #0C4A6E;border-radius:8px;padding:.65rem .85rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#BAE6FD;letter-spacing:.1em;margin-bottom:.25rem">&#9313; Vector Semantic</div>
+      <div style="font-size:11px;color:#7DD3FC;font-family:monospace;margin-bottom:.2rem">VEC_COSINE_DISTANCE()</div>
+      <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+        Amazon Titan server-side. 1536-dim cosine. No embedding client in your app code.
+      </div>
+    </div>
+  </div>
 
-    # Node traces
-    for mid, (x, y, name, color, size) in nodes.items():
-        status_map = {
-            "MBR-BOB-001": "active", "MBR-SAR-002": "active",
-            "MBR-MIK-003": "active", "MBR-ALE-004": "FLAGGED",
-            "MBR-JOR-005": "FROZEN",
-        }
-        hover = f"<b>{name}</b><br>{mid}<br>Status: {status_map[mid]}"
-        fig.add_trace(go.Scatter(
-            x=[x], y=[y],
-            mode="markers+text",
-            marker=dict(size=size, color=color, line=dict(color="white", width=2)),
-            text=[name],
-            textposition="top center",
-            textfont=dict(size=11, color="#0F172A"),
-            hovertext=[hover],
-            hoverinfo="text",
-            showlegend=False,
-        ))
+  <div style="text-align:center;color:#334155;font-size:13px;margin-bottom:.5rem">&#8595; merge rankings</div>
 
-    fig.update_layout(
-        title=dict(
-            text="Pay Friends Network - Fraud Chain Detection",
-            font=dict(size=14, color="#0F172A"), x=0.5,
-        ),
-        xaxis=dict(visible=False, range=[-1.3, 3.6]),
-        yaxis=dict(visible=False, range=[-0.6, 1.4]),
-        plot_bgcolor="#F8FAFC",
-        paper_bgcolor="#F8FAFC",
-        margin=dict(l=20, r=20, t=50, b=20),
-        height=320,
-        annotations=[
-            dict(x=3.0, y=-0.4, text="&#128274; Frozen account<br>Zero prior history",
-                 showarrow=True, arrowhead=2, ax=0, ay=-30,
-                 font=dict(size=10, color="#DC2626"),
-                 bgcolor="rgba(254,226,226,0.9)", borderpad=4,
-                 bordercolor="#EF4444"),
-            dict(x=2.1, y=-0.38, text="&#128681; 97% fraud confidence",
-                 showarrow=True, arrowhead=2, ax=10, ay=-25,
-                 font=dict(size=10, color="#EF4444"),
-                 bgcolor="rgba(254,226,226,0.9)", borderpad=4,
-                 bordercolor="#F59E0B"),
-        ],
-    )
-    return fig
+  <div style="background:#071E15;border:1px solid #064E3B;border-radius:8px;padding:.65rem .85rem;margin-bottom:.55rem">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#A7F3D0;letter-spacing:.1em;margin-bottom:.25rem">&#9314; RRF Fusion (Python-side)</div>
+    <div style="font-size:12px;color:#6EE7B7;font-family:monospace">score = 1/(60 + rank_bm25) + 1/(60 + rank_vec)</div>
+    <div style="font-size:11px;color:#94A3B8;margin-top:.2rem">Strong in both signals rises to #1. k=60 dampens outliers.</div>
+  </div>
+
+  <div style="text-align:center;color:#334155;font-size:13px;margin-bottom:.5rem">&#8595;</div>
+
+  <div style="background:#071A12;border:1px solid #065F46;border-left:3px solid #00C49A;border-radius:8px;padding:.65rem .85rem">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#34D399;margin-bottom:.2rem">&#10003; Top Result: TKT-BOB-001</div>
+    <div style="font-size:11.5px;color:#A7F3D0;line-height:1.5">"Shell Houston TX — Chicago account, no travel alert set"</div>
+  </div>
+</div>
+"""
 
 
+def _flow_q2_cte() -> str:
+    return """
+<div style="background:#0F172A;border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:.75rem">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+              color:#FDE68A;margin-bottom:.85rem">WITH RECURSIVE — How the CTE Walks the Graph</div>
+
+  <div style="display:flex;flex-direction:column;gap:.45rem">
+
+    <div style="display:flex;align-items:flex-start;gap:.7rem">
+      <div style="background:#78350F;color:#FDE68A;border-radius:50%;min-width:22px;height:22px;
+                  display:flex;align-items:center;justify-content:center;font-size:11px;
+                  font-weight:700;margin-top:2px">1</div>
+      <div style="background:#1A1200;border:1px solid #78350F;border-radius:8px;padding:.55rem .85rem;flex:1">
+        <div style="font-size:11px;font-weight:700;color:#FDE68A;margin-bottom:.2rem">Anchor — Bob's direct transfers</div>
+        <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+          WHERE from_member_id = 'MBR-BOB-001' at depth=0.<br>
+          Returns: Bob&#8594;Sarah ($35) and Bob&#8594;Mike ($200).
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#334155;font-size:13px;padding-left:32px">&#8595; recurse</div>
+
+    <div style="display:flex;align-items:flex-start;gap:.7rem">
+      <div style="background:#78350F;color:#FDE68A;border-radius:50%;min-width:22px;height:22px;
+                  display:flex;align-items:center;justify-content:center;font-size:11px;
+                  font-weight:700;margin-top:2px">2</div>
+      <div style="background:#1A1200;border:1px solid #78350F;border-radius:8px;padding:.55rem .85rem;flex:1">
+        <div style="font-size:11px;font-weight:700;color:#FDE68A;margin-bottom:.2rem">Recurse — follow each recipient (depth &lt; 3)</div>
+        <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+          JOIN where e.from_member_id = pc.to_member_id, depth+1.<br>
+          depth=1: Mike&#8594;Alex ($180, +28 min)<br>
+          depth=2: Alex&#8594;Jordan ($170, +15 min)
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#334155;font-size:13px;padding-left:32px">&#8595; enrich</div>
+
+    <div style="display:flex;align-items:flex-start;gap:.7rem">
+      <div style="background:#78350F;color:#FDE68A;border-radius:50%;min-width:22px;height:22px;
+                  display:flex;align-items:center;justify-content:center;font-size:11px;
+                  font-weight:700;margin-top:2px">3</div>
+      <div style="background:#1A1200;border:1px solid #78350F;border-radius:8px;padding:.55rem .85rem;flex:1">
+        <div style="font-size:11px;font-weight:700;color:#FDE68A;margin-bottom:.2rem">Enrich — LEFT JOIN fraud_flags at each hop</div>
+        <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+          Attaches flag_type + confidence_score per transfer_id.<br>
+          Surfaces money_mule_pattern (0.97) on the Alex&#8594;Jordan edge.
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#334155;font-size:13px;padding-left:32px">&#8595;</div>
+
+    <div style="background:#071A12;border:1px solid #065F46;border-left:3px solid #F59E0B;
+                border-radius:8px;padding:.65rem .85rem;margin-left:32px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#34D399;margin-bottom:.2rem">&#10003; 4-row result — full chain</div>
+      <div style="font-size:11px;color:#A7F3D0;font-family:monospace;line-height:1.75">
+        depth=0: Bob&#8594;Sarah ($35, normal)<br>
+        depth=0: Bob&#8594;Mike ($200, trigger)<br>
+        depth=1: Mike&#8594;Alex ($180, &#9888; 0.91)<br>
+        depth=2: Alex&#8594;Jordan ($170, &#128680; 0.97)
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+
+def _flow_q3() -> str:
+    return """
+<div style="background:#0F172A;border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:.75rem">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+              color:#60A5FA;margin-bottom:.85rem">How TiDB Assembles the Alert</div>
+
+  <div style="display:flex;gap:.75rem;margin-bottom:.55rem">
+    <div style="flex:1;background:#1A0A0A;border:1px solid #7F1D1D;border-radius:8px;padding:.65rem .85rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#FCA5A5;letter-spacing:.1em;margin-bottom:.25rem">&#9312; Relational JOIN</div>
+      <div style="font-size:11px;color:#F87171;font-family:monospace;margin-bottom:.2rem">fc_members &#8904; fc_fraud_flags</div>
+      <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+        2 active flags returned:<br>
+        out_of_state: <b style="color:#FCA5A5">0.82</b><br>
+        money_mule: <b style="color:#FCA5A5">0.97</b>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;color:#475569;font-size:18px;padding:0 .15rem">+</div>
+    <div style="flex:1;background:#0A1F33;border:1px solid #0C4A6E;border-radius:8px;padding:.65rem .85rem">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#BAE6FD;letter-spacing:.1em;margin-bottom:.25rem">&#9313; Hybrid Search</div>
+      <div style="font-size:11px;color:#7DD3FC;font-family:monospace;margin-bottom:.2rem">BM25 + Vector on tickets</div>
+      <div style="font-size:11px;color:#94A3B8;line-height:1.5">
+        "fraud alert unusual activity"<br>
+        Pulls prior support history so the AI doesn't repeat itself.
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;color:#334155;font-size:13px;margin-bottom:.5rem">&#8595; combine</div>
+
+  <div style="background:#1A0D00;border:1px solid #92400E;border-left:3px solid #F59E0B;
+              border-radius:8px;padding:.65rem .85rem">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#FDE68A;margin-bottom:.2rem">&#10003; Full Alert Context</div>
+    <div style="font-size:11.5px;color:#FEF3C7;line-height:1.5">
+      Structured flags (exact scores) + recalled ticket history = precise, non-repetitive summary
+    </div>
+  </div>
+</div>
+"""
+
+
+# ── SQL panel builders ────────────────────────────────────────────────────────
 def _sql_q1(query: str, results: list) -> str:
     fts_sql = (
         "SELECT id, ticket_id, member_id,\n"
@@ -392,7 +444,7 @@ no embedding client in your application code.
 </div>
 
 <span class="sql-section-label lbl-res">Matched tickets</span>
-{rows if rows else '<div style="font-family:-apple-system,system-ui,sans-serif;color:#475569;font-size:13px;margin:.5rem 0">Click a question to see live results.</div>'}
+{rows if rows else '<div style="font-family:-apple-system,system-ui,sans-serif;color:#475569;font-size:13px;margin:.5rem 0">Live results load on first render.</div>'}
 """
 
 
@@ -499,503 +551,392 @@ Structured fraud flag data + recalled support history are combined.
 """
 
 
+# ── Network graph ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def _build_network_graph() -> go.Figure:
+    nodes = {
+        "MBR-BOB-001": (0.0, 0.0, "Bob Johnson", "#00C49A", 22),
+        "MBR-SAR-002": (-0.8, 0.9, "Sarah Chen", "#00C49A", 18),
+        "MBR-MIK-003": (1.0, 0.0, "Mike Torres", "#F59E0B", 18),
+        "MBR-ALE-004": (2.0, 0.0, "Alex Rivera", "#EF4444", 18),
+        "MBR-JOR-005": (3.0, 0.0, "Jordan Kim", "#DC2626", 18),
+    }
+    edges = [
+        ("MBR-BOB-001", "MBR-SAR-002", "$35", "#94A3B8", "normal"),
+        ("MBR-BOB-001", "MBR-MIK-003", "$200", "#3B82F6", "trigger"),
+        ("MBR-MIK-003", "MBR-ALE-004", "$180 +28min", "#F59E0B", "flagged"),
+        ("MBR-ALE-004", "MBR-JOR-005", "$170 +15min", "#EF4444", "flagged"),
+    ]
+    fig = go.Figure()
+    for src, dst, label, color, etype in edges:
+        x0, y0 = nodes[src][0], nodes[src][1]
+        x1, y1 = nodes[dst][0], nodes[dst][1]
+        fig.add_trace(go.Scatter(
+            x=[x0, x1, None], y=[y0, y1, None], mode="lines",
+            line=dict(color=color, width=2 if etype == "normal" else 3,
+                      dash="dot" if etype == "normal" else "solid"),
+            hoverinfo="skip", showlegend=False,
+        ))
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2 + 0.1
+        fig.add_annotation(x=mx, y=my, text=f"<b>{label}</b>", showarrow=False,
+                           font=dict(size=11, color=color),
+                           bgcolor="rgba(255,255,255,0.85)", borderpad=3)
+    status_map = {"MBR-BOB-001": "active", "MBR-SAR-002": "active",
+                  "MBR-MIK-003": "active", "MBR-ALE-004": "FLAGGED", "MBR-JOR-005": "FROZEN"}
+    for mid, (x, y, name, color, size) in nodes.items():
+        fig.add_trace(go.Scatter(
+            x=[x], y=[y], mode="markers+text",
+            marker=dict(size=size, color=color, line=dict(color="white", width=2)),
+            text=[name], textposition="top center",
+            textfont=dict(size=11, color="#0F172A"),
+            hovertext=[f"<b>{name}</b><br>{mid}<br>Status: {status_map[mid]}"],
+            hoverinfo="text", showlegend=False,
+        ))
+    fig.update_layout(
+        title=dict(text="Pay Friends Network - Fraud Chain", font=dict(size=14, color="#0F172A"), x=0.5),
+        xaxis=dict(visible=False, range=[-1.3, 3.6]),
+        yaxis=dict(visible=False, range=[-0.6, 1.4]),
+        plot_bgcolor="#F8FAFC", paper_bgcolor="#F8FAFC",
+        margin=dict(l=20, r=20, t=45, b=20), height=270,
+        annotations=[
+            dict(x=3.0, y=-0.4, text="&#128274; Frozen<br>Zero history",
+                 showarrow=True, arrowhead=2, ax=0, ay=-28,
+                 font=dict(size=10, color="#DC2626"),
+                 bgcolor="rgba(254,226,226,0.9)", borderpad=4, bordercolor="#EF4444"),
+            dict(x=2.1, y=-0.35, text="&#128680; 97% fraud",
+                 showarrow=True, arrowhead=2, ax=10, ay=-22,
+                 font=dict(size=10, color="#EF4444"),
+                 bgcolor="rgba(254,226,226,0.9)", borderpad=4, bordercolor="#F59E0B"),
+        ],
+    )
+    return fig
+
+
+# ── Cached data loaders ───────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
-def _get_stats():
-    return get_db_stats()
-
+def _get_stats(): return get_db_stats()
 
 @st.cache_data(ttl=60)
-def _get_pay_friends():
-    return get_all_pay_friends()
-
+def _get_tickets(): return get_all_tickets()
 
 @st.cache_data(ttl=60)
-def _get_tickets():
-    return get_all_tickets()
-
+def _get_fraud(): return get_all_fraud_flags()
 
 @st.cache_data(ttl=60)
-def _get_fraud():
-    return get_all_fraud_flags()
-
-
-@st.cache_data(ttl=60)
-def _get_transactions():
-    return get_recent_transactions("MBR-BOB-001", limit=10)
-
+def _get_transactions(): return get_recent_transactions("MBR-BOB-001", limit=10)
 
 @st.cache_data(ttl=300)
-def _get_indexes():
-    return get_index_info()
+def _get_indexes(): return get_index_info()
 
 
-# ── Header ─────────────────────────────────────────────────────────────────────
+# ── Shared sub-components ─────────────────────────────────────────────────────
+def _render_stat_cards(keys: list):
+    defs = {
+        "support_tickets": ("Support Tickets", "#7C3AED", "#F5F3FF"),
+        "embeddings":      ("Vector Embeddings", "#0891B2", "#ECFEFF"),
+        "fraud_flags":     ("Fraud Flags", "#DC2626", "#FEF2F2"),
+        "pay_friends_edges": ("Pay Friends Edges", "#D97706", "#FFFBEB"),
+        "members":         ("Members", "#0369A1", "#EFF6FF"),
+        "transactions":    ("Transactions", "#059669", "#F0FDF4"),
+    }
+    try:
+        stats = _get_stats()
+        cols = st.columns(len(keys), gap="small")
+        for col, k in zip(cols, keys):
+            label, color, bg = defs[k]
+            with col:
+                st.markdown(
+                    f'<div style="background:{bg};border:1px solid {color}33;border-radius:8px;'
+                    f'padding:.75rem 1rem;text-align:center">'
+                    f'<div style="font-size:1.75rem;font-weight:800;color:{color}">{stats.get(k,0)}</div>'
+                    f'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;'
+                    f'color:{color};margin-top:.15rem">{label}</div></div>',
+                    unsafe_allow_html=True)
+    except Exception:
+        pass
+
+
+def _render_index_cards():
+    try:
+        indexes = _get_indexes()
+        vec_ok = any(i.get("Index_type") == "HNSW" or i.get("Key_name", "").startswith("vec")
+                     for i in indexes)
+        fts_ok = any(i.get("Index_type") == "FULLTEXT" for i in indexes)
+        ic1, ic2 = st.columns(2, gap="small")
+        with ic1:
+            st.markdown(
+                f'<div style="background:#F5F3FF;border:1px solid #7C3AED44;border-radius:8px;padding:.65rem .9rem">'
+                f'<div style="font-size:11px;font-weight:700;color:#7C3AED">HNSW Vector Index</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:#7C3AED;margin:.15rem 0">{"&#10003; Active" if vec_ok else "&#10007; None"}</div>'
+                f'<div style="font-size:11px;color:#64748B">content_vec — 1536-dim cosine, HNSW graph</div></div>',
+                unsafe_allow_html=True)
+        with ic2:
+            st.markdown(
+                f'<div style="background:#F0FDF4;border:1px solid #05996944;border-radius:8px;padding:.65rem .9rem">'
+                f'<div style="font-size:11px;font-weight:700;color:#059669">BM25 Full-Text Index</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:#059669;margin:.15rem 0">{"&#10003; Active" if fts_ok else "&#10007; None"}</div>'
+                f'<div style="font-size:11px;color:#64748B">content — MULTILINGUAL parser, inverted index</div></div>',
+                unsafe_allow_html=True)
+    except Exception:
+        pass
+
+
+def _phone_labels():
+    lc, rc = st.columns(2)
+    with lc:
+        st.markdown('<div style="text-align:center;font-size:11px;font-weight:700;'
+                    'text-transform:uppercase;letter-spacing:.1em;color:#94A3B8;'
+                    'margin-bottom:.5rem">Without Memory</div>', unsafe_allow_html=True)
+    with rc:
+        st.markdown('<div style="text-align:center;font-size:11px;font-weight:700;'
+                    'text-transform:uppercase;letter-spacing:.1em;color:#00C49A;'
+                    'margin-bottom:.5rem">With TiDB Memory</div>', unsafe_allow_html=True)
+
+
+def _build_snippets(results: list, fallback_key: int) -> list:
+    if results:
+        return [
+            f"{r.get('ticket_id','?')} - {str(r.get('content',''))[:55]}... "
+            f"(score {float(r.get('_score') or r.get('_distance') or 0):.3f})"
+            for r in results[:2]
+        ]
+    return MEM_SNIPPETS[fallback_key]
+
+
+# ── Load all scenario results once ───────────────────────────────────────────
+@st.cache_data(ttl=120, show_spinner="Querying TiDB memory...")
+def _load_all_results() -> dict:
+    out = {}
+    for num, query in QUESTIONS.items():
+        try:
+            out[num] = recall_support("MBR-BOB-001", query, limit=4)
+        except Exception:
+            out[num] = []
+    return out
+
+_data = _load_all_results()
+
+# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="padding:1.25rem 0 .25rem">
-  <span style="font-size:22px;font-weight:800;color:#00C49A">FinanceCo</span>
-  <span style="font-size:16px;color:#64748B;margin-left:.6rem">AI Member Support Demo</span>
-  <span style="font-size:12px;color:#94A3B8;margin-left:1rem">
-    Powered by TiDB Cloud &nbsp;&#8226;&nbsp; Hybrid Search + Graph Traversal
-  </span>
+<div style="padding:1rem 0 .25rem;display:flex;align-items:center;justify-content:space-between">
+  <div>
+    <span style="font-size:22px;font-weight:800;color:#00C49A">FinanceCo</span>
+    <span style="font-size:16px;color:#64748B;margin-left:.6rem">AI Member Support Demo</span>
+    <span style="font-size:12px;color:#94A3B8;margin-left:1rem">
+      Powered by TiDB Cloud &nbsp;&#8226;&nbsp; Hybrid Search + Graph Traversal
+    </span>
+  </div>
+  <div style="font-size:12px;background:#F0FDF4;color:#059669;padding:4px 12px;
+              border-radius:12px;border:1px solid #BBF7D0">
+    Bob Johnson &nbsp;&#8226;&nbsp; MBR-BOB-001 &nbsp;&#8226;&nbsp; Chicago, IL
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-tab_setup, tab_app, tab_dash, tab_sql = st.tabs([
-    "  &#x2699;&#xFE0F; The Setup  ",
-    "  &#x1F4F1; FinanceCo App  ",
-    "  &#x1F4CA; Memory Dashboard  ",
-    "  &#x1F50D; Backend SQL  ",
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs([
+    "  &#x26FD;  Scenario 1 — Gas Pump Declined  ",
+    "  &#x26A0;&#xFE0F;  Scenario 2 — Pay Friends Fraud  ",
+    "  &#x1F514;  Scenario 3 — Fraud Alert  ",
 ])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 - THE SETUP
+# SCENARIO 1 — Hybrid Search (BM25 + Vector + RRF)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_setup:
-    # Hero header
+with tab1:
+    s1 = _data.get(1, [])
+    s1_snippets = _build_snippets(s1, 1)
+
     st.markdown("""
     <div style="background:linear-gradient(135deg,#022C22 0%,#064E3B 100%);
-                border-radius:14px;padding:2.5rem 3rem;margin-bottom:1.5rem;color:#F0FDF4">
-      <div style="font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
-                  color:#34D399;margin-bottom:.5rem">Demo Scenario</div>
-      <div style="font-size:2rem;font-weight:800;line-height:1.2;color:#ECFDF5;margin-bottom:.75rem">
-        AI Support Agent with Long-Term Member Memory
+                border-radius:12px;padding:1.1rem 1.75rem;margin-bottom:1rem">
+      <div style="font-size:10px;letter-spacing:.15em;color:#34D399;text-transform:uppercase;
+                  font-weight:700;margin-bottom:.3rem">
+        Scenario 1 of 3 &nbsp;&#8226;&nbsp; Hybrid Search (BM25 + Vector + RRF)
       </div>
-      <div style="font-size:1rem;color:#A7F3D0;line-height:1.75;max-width:700px">
-        FinanceCo's AI agent handles 60% of member calls autonomously.
-        Without memory, every interaction starts cold - no context, no personalization, no pattern detection.
-        With TiDB Cloud, the agent knows Bob's history, flags fraud chains, and resolves issues in seconds.
+      <div style="font-size:1.4rem;font-weight:800;color:#ECFDF5">
+        &#x26FD; "Why was my gas pump declined?"
       </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_l, col_r = st.columns(2, gap="medium")
-    with col_l:
-        st.markdown("""
-        <div style="background:#1F0A0A;border:1px solid #7F1D1D;border-radius:12px;
-                    padding:1.5rem 1.75rem;height:100%">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
-                      color:#FCA5A5;margin-bottom:1rem">Without Memory</div>
-          <ul style="font-size:15px;color:#FCA5A5;line-height:2.0;padding-left:1.25rem;margin:0">
-            <li>Generic responses - no member context</li>
-            <li>Member must re-explain every issue</li>
-            <li>Can't detect fraud patterns across interactions</li>
-            <li>No awareness of prior incidents or resolutions</li>
-            <li>High escalation rate to human agents</li>
-          </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_r:
-        st.markdown("""
-        <div style="background:#052E16;border:1px solid #14532D;border-radius:12px;
-                    padding:1.5rem 1.75rem;height:100%">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
-                      color:#86EFAC;margin-bottom:1rem">With TiDB Memory</div>
-          <ul style="font-size:15px;color:#86EFAC;line-height:2.0;padding-left:1.25rem;margin:0">
-            <li>Personalized responses using member history</li>
-            <li>Surfaces past incidents instantly via hybrid search</li>
-            <li>Graph traversal detects multi-hop fraud chains</li>
-            <li>Cites exact prior ticket IDs and resolutions</li>
-            <li>60%+ autonomous resolution - fewer escalations</li>
-          </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
-
-    # Scenario cards
-    st.markdown("""
-    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
-                color:#0369A1;margin-bottom:.75rem">Demo Scenarios - Bob Johnson, FinanceCo Member</div>
-    """, unsafe_allow_html=True)
-
-    sc1, sc2, sc3 = st.columns(3, gap="medium")
-    with sc1:
-        st.markdown("""
-        <div style="background:#0C1F3F;border:1px solid #1E40AF;border-radius:12px;padding:1.25rem 1.5rem">
-          <div style="font-size:20px;margin-bottom:.5rem">&#x26FD;</div>
-          <div style="font-size:13px;font-weight:700;color:#93C5FD;margin-bottom:.5rem">Scenario 1 - Member Support</div>
-          <div style="font-size:14px;color:#BFDBFE;line-height:1.65">
-            Bob's gas pump was declined. He asks why.<br><br>
-            <b style="color:#fff">Engine:</b> Hybrid search (BM25 + vector) on support ticket history retrieves the exact incident record.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with sc2:
-        st.markdown("""
-        <div style="background:#2D1515;border:1px solid #991B1B;border-radius:12px;padding:1.25rem 1.5rem">
-          <div style="font-size:20px;margin-bottom:.5rem">&#x26A0;&#xFE0F;</div>
-          <div style="font-size:13px;font-weight:700;color:#FCA5A5;margin-bottom:.5rem">Scenario 2 - Fraud Detection</div>
-          <div style="font-size:14px;color:#FECACa;line-height:1.65">
-            Bob's Pay Friends transfer triggered a 3-hop money chain.<br><br>
-            <b style="color:#fff">Engine:</b> Recursive CTE walks the graph + hybrid search adds context. No graph DB needed.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with sc3:
-        st.markdown("""
-        <div style="background:#1A1A0A;border:1px solid #854D0E;border-radius:12px;padding:1.25rem 1.5rem">
-          <div style="font-size:20px;margin-bottom:.5rem">&#x1F514;</div>
-          <div style="font-size:13px;font-weight:700;color:#FDE68A;margin-bottom:.5rem">Scenario 3 - Fraud Alert Summary</div>
-          <div style="font-size:14px;color:#FEF3C7;line-height:1.65">
-            Bob got a notification and wants to understand both active flags.<br><br>
-            <b style="color:#fff">Engine:</b> Relational join on fraud_flags + hybrid search on prior alert history.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Architecture note
-    st.markdown("""
-    <div style="background:#0F172A;border:1px solid #334155;border-radius:10px;
-                padding:1.25rem 1.75rem;margin-top:1.5rem">
-      <div style="font-size:12px;font-weight:700;color:#60A5FA;text-transform:uppercase;
-                  letter-spacing:.1em;margin-bottom:.6rem">TiDB Cloud Architecture</div>
-      <div style="font-size:13.5px;color:#94A3B8;line-height:1.8">
-        <b style="color:#E2E8F0">5 tables, 1 database, 1 connection string.</b>
-        &nbsp;OLTP + vector embeddings + full-text BM25 + graph CTE traversal - all in standard SQL.
-        No Redis for cache. No Pinecone for vectors. No Neo4j for graphs. No Elasticsearch for search.
-        &nbsp;<b style="color:#34D399">PII never leaves your VPC</b> - embeddings generated server-side by TiDB,
-        raw text never sent to an external embedding API.
+      <div style="font-size:13px;color:#A7F3D0;margin-top:.4rem;max-width:960px;line-height:1.65">
+        Bob's Shell charge was blocked in Houston TX — his account is Chicago IL-based with no travel alert.
+        Without memory: generic troubleshooting. With TiDB: hybrid search pinpoints the exact prior
+        incident record in milliseconds. BM25 catches the domain keywords. Vector catches the semantic meaning.
+        RRF merges both into a single ranked result.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
+    col_ph, col_rt = st.columns([5, 7], gap="medium")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 - FINANCO APP
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_app:
-    # Bob header
-    st.markdown("""
-    <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;
-                padding:.9rem 1.25rem;margin-bottom:1.25rem;display:inline-block;width:100%">
-      <span style="font-size:22px">&#128100;</span>
-      <span style="font-size:16px;font-weight:700;color:#0F172A;margin-left:.5rem">Bob Johnson</span>
-      <span style="font-size:13px;color:#64748B;margin-left:.75rem">MBR-BOB-001 &nbsp;&#8226;&nbsp; Active &nbsp;&#8226;&nbsp; SpotMe $200 &nbsp;&#8226;&nbsp; Chicago, IL</span>
-    </div>
-    """, unsafe_allow_html=True)
+    with col_ph:
+        _phone_labels()
+        pl, pr = st.columns(2, gap="small")
+        with pl:
+            st.html(_phone_frame("No context", QUESTIONS[1], WITHOUT_MEM[1], header_color="#64748B"))
+        with pr:
+            st.html(_phone_frame("TiDB-powered", QUESTIONS[1], WITH_MEM[1], mem_snippets=s1_snippets))
 
-    # Question chips
-    st.markdown("""
-    <div style="font-size:12px;font-weight:700;color:#64748B;text-transform:uppercase;
-                letter-spacing:.08em;margin-bottom:.6rem">Ask as Bob:</div>
-    """, unsafe_allow_html=True)
+    with col_rt:
+        st.html(_flow_q1())
+        st.markdown(f'<div class="sql-panel">{_sql_q1(QUESTIONS[1], s1)}</div>',
+                    unsafe_allow_html=True)
 
-    q_cols = st.columns([1, 1.3, 1], gap="small")
-    with q_cols[0]:
-        q1_click = st.button("⛽ Why was my gas pump declined?", use_container_width=True,
-                             type="primary" if st.session_state.active_q == 1 else "secondary")
-    with q_cols[1]:
-        q2_click = st.button("⚠️ Did my Pay Friends transfer go through? It looks suspicious.",
-                             use_container_width=True,
-                             type="primary" if st.session_state.active_q == 2 else "secondary")
-    with q_cols[2]:
-        q3_click = st.button("🔔 I got a fraud notification. What happened?",
-                             use_container_width=True,
-                             type="primary" if st.session_state.active_q == 3 else "secondary")
-
-    if q1_click:
-        st.session_state.active_q = 1
-    if q2_click:
-        st.session_state.active_q = 2
-    if q3_click:
-        st.session_state.active_q = 3
-
-    if st.session_state.active_q is None:
-        st.markdown("""
-        <div style="text-align:center;color:#94A3B8;font-size:15px;margin:3rem 0;line-height:2">
-          Select a question above to see how TiDB memory transforms the response.<br>
-          Left phone: no memory &nbsp;&#8226;&nbsp; Right phone: with TiDB memory
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        aq = st.session_state.active_q
-        q_text = QUESTIONS[aq]
-
-        # Run live recall for real snippets
-        with st.spinner("Searching memory..."):
-            try:
-                if aq not in st.session_state.q_results:
-                    live_results = recall_support("MBR-BOB-001", q_text, limit=4)
-                    live_sql = get_last_sql(6)
-                    st.session_state.q_results[aq] = {
-                        "recall": live_results,
-                        "sql": live_sql,
-                    }
-                cached = st.session_state.q_results[aq]
-                live_results = cached["recall"]
-                live_sql = cached["sql"]
-
-                # Build real snippets from live results
-                live_snippets = [
-                    f"{r.get('ticket_id','?')} - {str(r.get('content',''))[:60]}... "
-                    f"(score {float(r.get('_score') or r.get('_distance') or 0):.3f})"
-                    for r in live_results[:2]
-                ] if live_results else MEM_SNIPPETS[aq]
-
-            except Exception:
-                live_results = []
-                live_sql = []
-                live_snippets = MEM_SNIPPETS[aq]
-
-        # Side-by-side phones
-        phone_left, phone_right = st.columns(2, gap="large")
-
-        with phone_left:
-            st.markdown("""
-            <div style="text-align:center;font-size:11px;font-weight:700;text-transform:uppercase;
-                        letter-spacing:.1em;color:#94A3B8;margin-bottom:.75rem">
-              Without Memory
-            </div>
-            """, unsafe_allow_html=True)
-            st.html(
-                _phone_frame("No context", q_text, WITHOUT_MEM[aq],
-                             header_color="#64748B")
-            )
-
-        with phone_right:
-            st.markdown("""
-            <div style="text-align:center;font-size:11px;font-weight:700;text-transform:uppercase;
-                        letter-spacing:.1em;color:#00C49A;margin-bottom:.75rem">
-              With TiDB Memory
-            </div>
-            """, unsafe_allow_html=True)
-            st.html(
-                _phone_frame("TiDB-powered", q_text, WITH_MEM[aq],
-                             mem_snippets=live_snippets)
-            )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 - MEMORY DASHBOARD
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_dash:
+    st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:11px;font-weight:700;text-transform:uppercase;'
+                'letter-spacing:.1em;color:#7C3AED;margin-bottom:.6rem">'
+                'Memory Layer</div>', unsafe_allow_html=True)
+    _render_stat_cards(["support_tickets", "embeddings", "members", "transactions"])
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+    _render_index_cards()
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
     try:
-        stats = _get_stats()
+        import pandas as pd
+        tickets = _get_tickets()
+        if tickets:
+            df = pd.DataFrame(tickets)
+            st.dataframe(
+                df[["ticket_id", "member_id", "vec_dims", "snippet", "created_at"]],
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "ticket_id": "Ticket ID", "member_id": "Member",
+                    "vec_dims": st.column_config.NumberColumn("Vec Dims", format="%d"),
+                    "snippet": "Content Preview", "created_at": "Created",
+                },
+            )
+    except Exception:
+        pass
 
-        # ── Stat cards ────────────────────────────────────────────────────────
-        c1, c2, c3, c4, c5, c6 = st.columns(6, gap="small")
-        card_defs = [
-            (c1, stats.get("members", 0), "Members", "#0369A1", "#EFF6FF"),
-            (c2, stats.get("transactions", 0), "Transactions", "#059669", "#F0FDF4"),
-            (c3, stats.get("support_tickets", 0), "Support Tickets", "#7C3AED", "#F5F3FF"),
-            (c4, stats.get("fraud_flags", 0), "Fraud Flags", "#DC2626", "#FEF2F2"),
-            (c5, stats.get("pay_friends_edges", 0), "Pay Friends Edges", "#D97706", "#FFFBEB"),
-            (c6, stats.get("embeddings", 0), "Vector Embeddings", "#0891B2", "#ECFEFF"),
-        ]
-        for col, val, label, color, bg in card_defs:
-            with col:
-                st.markdown(
-                    f'<div style="background:{bg};border:1px solid {color}33;border-radius:10px;'
-                    f'padding:1rem;text-align:center">'
-                    f'<div style="font-size:2rem;font-weight:800;color:{color}">{val}</div>'
-                    f'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;'
-                    f'color:{color};margin-top:.2rem">{label}</div></div>',
-                    unsafe_allow_html=True,
-                )
 
-        st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENARIO 2 — Recursive CTE + Hybrid Search
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    s2 = _data.get(2, [])
+    s2_snippets = _build_snippets(s2, 2)
 
-        # ── Pay Friends graph ─────────────────────────────────────────────────
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#2D0808 0%,#7F1D1D 100%);
+                border-radius:12px;padding:1.1rem 1.75rem;margin-bottom:1rem">
+      <div style="font-size:10px;letter-spacing:.15em;color:#FCA5A5;text-transform:uppercase;
+                  font-weight:700;margin-bottom:.3rem">
+        Scenario 2 of 3 &nbsp;&#8226;&nbsp; Recursive CTE Graph Traversal + Hybrid Search
+      </div>
+      <div style="font-size:1.4rem;font-weight:800;color:#FEF2F2">
+        &#x26A0;&#xFE0F; "Did my Pay Friends transfer go through? It looks suspicious."
+      </div>
+      <div style="font-size:13px;color:#FECACA;margin-top:.4rem;max-width:960px;line-height:1.65">
+        Bob sent $200 to Mike. That triggered a 3-hop forwarding chain ending at a frozen account.
+        No graph database needed &mdash; a single <code style="background:rgba(0,0,0,.35);
+        padding:1px 6px;border-radius:4px;color:#FDE68A">WITH RECURSIVE</code> CTE walks
+        Bob&rarr;Mike&rarr;Alex&rarr;Jordan and attaches fraud flags at each hop. Standard SQL.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_ph, col_rt = st.columns([5, 7], gap="medium")
+
+    with col_ph:
+        _phone_labels()
+        pl, pr = st.columns(2, gap="small")
+        with pl:
+            st.html(_phone_frame("No context", QUESTIONS[2], WITHOUT_MEM[2], header_color="#64748B"))
+        with pr:
+            st.html(_phone_frame("TiDB-powered", QUESTIONS[2], WITH_MEM[2], mem_snippets=s2_snippets))
+
+    with col_rt:
         st.plotly_chart(_build_network_graph(), use_container_width=True)
+        st.html(_flow_q2_cte())
+        st.markdown(f'<div class="sql-panel">{_sql_q2()}</div>', unsafe_allow_html=True)
 
-        # ── Index info ────────────────────────────────────────────────────────
-        indexes = _get_indexes()
-        vec_idx  = [i for i in indexes if i.get("Index_type") == "HNSW" or i.get("Key_name", "").startswith("vec")]
-        fts_idx  = [i for i in indexes if i.get("Index_type") == "FULLTEXT"]
-        norm_idx = [i for i in indexes if i.get("Index_type") == "BTREE"
-                    and i.get("Key_name") not in ("PRIMARY",)]
-
-        idx_cols = st.columns(3, gap="small")
-        idx_defs = [
-            (idx_cols[0], "HNSW Vector Index", len(vec_idx) > 0, "#7C3AED", "#F5F3FF",
-             "fc_support_tickets.content_vec - 1536-dim cosine, HNSW graph"),
-            (idx_cols[1], "BM25 Full-Text Index", len(fts_idx) > 0, "#059669", "#F0FDF4",
-             "fc_support_tickets.content - MULTILINGUAL parser, inverted index"),
-            (idx_cols[2], "B-Tree Indexes", len(norm_idx), "#0369A1", "#EFF6FF",
-             "member_id, ticket_id, transaction_id lookups"),
-        ]
-        for col, label, val, color, bg, note in idx_defs:
-            with col:
-                display = "✓ Active" if val is True else ("✗ None" if val == 0 else f"{val} active")
-                st.markdown(
-                    f'<div style="background:{bg};border:1px solid {color}44;border-radius:8px;'
-                    f'padding:.9rem 1rem">'
-                    f'<div style="font-size:12px;font-weight:700;color:{color}">{label}</div>'
-                    f'<div style="font-size:1.3rem;font-weight:800;color:{color};margin:.3rem 0">{display}</div>'
-                    f'<div style="font-size:11px;color:#64748B">{note}</div></div>',
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
-
-        # ── Data tables ───────────────────────────────────────────────────────
-        dtab1, dtab2, dtab3 = st.tabs(["Support Tickets", "Fraud Flags", "Bob's Transactions"])
-
-        with dtab1:
-            tickets = _get_tickets()
-            if tickets:
-                import pandas as pd
-                df = pd.DataFrame(tickets)
-                st.dataframe(
-                    df[["ticket_id", "member_id", "vec_dims", "snippet", "created_at"]],
-                    use_container_width=True, hide_index=True,
-                    column_config={
-                        "ticket_id": "Ticket ID",
-                        "member_id": "Member",
-                        "vec_dims": st.column_config.NumberColumn("Vec Dims", format="%d"),
-                        "snippet": "Content (truncated)",
-                        "created_at": "Created",
-                    },
-                )
-            else:
-                st.info("No tickets found. Run `python seed.py` first.")
-
-        with dtab2:
-            flags = _get_fraud()
-            if flags:
-                import pandas as pd
-                df = pd.DataFrame(flags)
-                st.dataframe(
-                    df[["member_name", "flag_type", "confidence_score", "description", "resolved", "created_at"]],
-                    use_container_width=True, hide_index=True,
-                    column_config={
-                        "member_name": "Member",
-                        "flag_type": "Flag Type",
-                        "confidence_score": st.column_config.NumberColumn("Confidence", format="%.2f"),
-                        "description": "Description",
-                        "resolved": "Resolved",
-                        "created_at": "Flagged At",
-                    },
-                )
-            else:
-                st.info("No fraud flags found.")
-
-        with dtab3:
-            txns = _get_transactions()
-            if txns:
-                import pandas as pd
-                df = pd.DataFrame(txns)
-                cols = ["transaction_id", "merchant_name", "merchant_category",
-                        "amount", "status", "created_at"]
-                st.dataframe(
-                    df[cols], use_container_width=True, hide_index=True,
-                    column_config={
-                        "transaction_id": "Txn ID",
-                        "merchant_name": "Merchant",
-                        "merchant_category": "Category",
-                        "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
-                        "status": "Status",
-                        "created_at": "Date",
-                    },
-                )
-            else:
-                st.info("No transactions found.")
-
-    except Exception as e:
-        st.error(f"Dashboard error: {e}")
-        st.info("Make sure TIDB_URL is set and `python seed.py` has been run.")
+    st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:11px;font-weight:700;text-transform:uppercase;'
+                'letter-spacing:.1em;color:#DC2626;margin-bottom:.6rem">'
+                'Graph + Fraud Data</div>', unsafe_allow_html=True)
+    _render_stat_cards(["pay_friends_edges", "fraud_flags", "members", "transactions"])
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+    try:
+        import pandas as pd
+        flags = _get_fraud()
+        if flags:
+            df = pd.DataFrame(flags)
+            st.dataframe(
+                df[["member_name", "flag_type", "confidence_score", "description",
+                    "resolved", "created_at"]],
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "member_name": "Member", "flag_type": "Flag Type",
+                    "confidence_score": st.column_config.NumberColumn("Confidence", format="%.2f"),
+                    "description": "Description", "resolved": "Resolved",
+                    "created_at": "Flagged At",
+                },
+            )
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 - BACKEND SQL
+# SCENARIO 3 — Relational JOIN + Hybrid Search
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_sql:
-    aq = st.session_state.active_q
-    cached = st.session_state.q_results.get(aq, {}) if aq else {}
-    live_results = cached.get("recall", [])
+with tab3:
+    s3 = _data.get(3, [])
+    s3_snippets = _build_snippets(s3, 3)
 
-    sql_l, sql_r = st.columns([3, 2], gap="medium")
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#1A0D00 0%,#78350F 100%);
+                border-radius:12px;padding:1.1rem 1.75rem;margin-bottom:1rem">
+      <div style="font-size:10px;letter-spacing:.15em;color:#FDE68A;text-transform:uppercase;
+                  font-weight:700;margin-bottom:.3rem">
+        Scenario 3 of 3 &nbsp;&#8226;&nbsp; Relational JOIN + Hybrid Search
+      </div>
+      <div style="font-size:1.4rem;font-weight:800;color:#FFFBEB">
+        &#x1F514; "I got a fraud notification. What happened?"
+      </div>
+      <div style="font-size:13px;color:#FEF3C7;margin-top:.4rem;max-width:960px;line-height:1.65">
+        Bob has 2 active flags. TiDB runs a relational JOIN on fc_fraud_flags for exact confidence
+        scores, while simultaneously hybrid-searching his support ticket history so the AI
+        doesn't repeat what was already explained. All from one cluster, one connection string.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with sql_l:
-        with st.expander(
-            "**Scenario 1 - Member Support: Hybrid Search**" +
-            (" ← active" if aq == 1 else ""),
-            expanded=(aq == 1 or aq is None),
-        ):
-            st.markdown(
-                f'<div class="sql-panel">'
-                f'{_sql_q1("gas pump declined", live_results if aq == 1 else [])}'
-                f'</div>',
-                unsafe_allow_html=True,
+    col_ph, col_rt = st.columns([5, 7], gap="medium")
+
+    with col_ph:
+        _phone_labels()
+        pl, pr = st.columns(2, gap="small")
+        with pl:
+            st.html(_phone_frame("No context", QUESTIONS[3], WITHOUT_MEM[3], header_color="#64748B"))
+        with pr:
+            st.html(_phone_frame("TiDB-powered", QUESTIONS[3], WITH_MEM[3], mem_snippets=s3_snippets))
+
+    with col_rt:
+        st.html(_flow_q3())
+        st.markdown(f'<div class="sql-panel">{_sql_q3()}</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:11px;font-weight:700;text-transform:uppercase;'
+                'letter-spacing:.1em;color:#D97706;margin-bottom:.6rem">'
+                'Fraud Data + Incident History</div>', unsafe_allow_html=True)
+    _render_stat_cards(["fraud_flags", "support_tickets", "embeddings", "members"])
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+    _render_index_cards()
+    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+    try:
+        import pandas as pd
+        txns = _get_transactions()
+        if txns:
+            df = pd.DataFrame(txns)
+            st.dataframe(
+                df[["transaction_id", "merchant_name", "merchant_category",
+                    "amount", "status", "created_at"]],
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "transaction_id": "Txn ID", "merchant_name": "Merchant",
+                    "merchant_category": "Category",
+                    "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
+                    "status": "Status", "created_at": "Date",
+                },
             )
-
-        with st.expander(
-            "**Scenario 2 - Fraud Detection: Recursive CTE + Hybrid Search**" +
-            (" ← active" if aq == 2 else ""),
-            expanded=(aq == 2),
-        ):
-            st.markdown(
-                f'<div class="sql-panel">{_sql_q2()}</div>',
-                unsafe_allow_html=True,
-            )
-
-        with st.expander(
-            "**Scenario 3 - Fraud Alert: Relational Lookup + Hybrid Search**" +
-            (" ← active" if aq == 3 else ""),
-            expanded=(aq == 3),
-        ):
-            st.markdown(
-                f'<div class="sql-panel">{_sql_q3()}</div>',
-                unsafe_allow_html=True,
-            )
-
-    with sql_r:
-        st.markdown("""
-        <div style="background:#0F172A;border-radius:10px;padding:1.25rem 1.5rem;color:#E2E8F0">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
-                      color:#60A5FA;margin-bottom:.75rem">TiDB Capability Map</div>
-          <div style="font-size:12.5px;line-height:1.9">
-            <div style="margin-bottom:.6rem">
-              <span style="background:#4C1D95;color:#DDD6FE;padding:2px 7px;border-radius:4px;
-                           font-size:11px;font-weight:700">BM25</span>
-              &nbsp;<span style="color:#94A3B8">Full-text search, MULTILINGUAL parser,
-              IDF-weighted scoring, no external search engine</span>
-            </div>
-            <div style="margin-bottom:.6rem">
-              <span style="background:#0C4A6E;color:#BAE6FD;padding:2px 7px;border-radius:4px;
-                           font-size:11px;font-weight:700">VECTOR</span>
-              &nbsp;<span style="color:#94A3B8">HNSW index, Amazon Titan embeddings called
-              server-side, cosine distance, no embedding client needed</span>
-            </div>
-            <div style="margin-bottom:.6rem">
-              <span style="background:#064E3B;color:#A7F3D0;padding:2px 7px;border-radius:4px;
-                           font-size:11px;font-weight:700">RRF</span>
-              &nbsp;<span style="color:#94A3B8">Python-side Reciprocal Rank Fusion merges
-              BM25 + vector rankings into a single ordered result</span>
-            </div>
-            <div style="margin-bottom:.6rem">
-              <span style="background:#78350F;color:#FDE68A;padding:2px 7px;border-radius:4px;
-                           font-size:11px;font-weight:700">GRAPH</span>
-              &nbsp;<span style="color:#94A3B8">WITH RECURSIVE CTE traverses Pay Friends
-              graph up to N hops in standard SQL - no Neo4j</span>
-            </div>
-            <div>
-              <span style="background:#1E1B4B;color:#C7D2FE;padding:2px 7px;border-radius:4px;
-                           font-size:11px;font-weight:700">OLTP</span>
-              &nbsp;<span style="color:#94A3B8">Row + columnar storage, ACID transactions,
-              members / transactions / fraud flags in same DB</span>
-            </div>
-          </div>
-          <div style="border-top:1px solid #1E293B;margin-top:1rem;padding-top:.75rem;
-                      font-size:11.5px;color:#475569;line-height:1.8">
-            All five capabilities run on a single TiDB Cloud Serverless cluster.
-            One connection string. No infrastructure to stitch together.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if aq and live_results:
-            st.markdown("""
-            <div style="background:#0F172A;border-radius:10px;padding:1.1rem 1.5rem;
-                        color:#E2E8F0;margin-top:.75rem;font-family:ui-monospace,monospace;
-                        font-size:12px">
-              <div style="font-size:11px;font-weight:700;text-transform:uppercase;
-                          letter-spacing:.1em;color:#34D399;margin-bottom:.6rem">
-                Live Capture - Last Query
-              </div>
-            """, unsafe_allow_html=True)
-            for entry in cached.get("sql", []):
-                sql_text = entry.get("sql", "")[:400]
-                st.code(sql_text, language="sql")
-            st.markdown("</div>", unsafe_allow_html=True)
+    except Exception:
+        pass
